@@ -1,178 +1,243 @@
 -- =======================================================
--- EVOMON HITBOX EXPANDER WITH CUSTOM UI CONTROL
+-- VIOLENCE DISTRICT HUB V3 (AUTO PERFECT SKILL CHECK)
 -- =======================================================
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
 local LocalPlayer = Players.LocalPlayer
 
--- KONFIGURASI DEFAULT
+-- KONFIGURASI GLOBAL
 local HitboxSize = 15
-local IsTransparent = true
 local ExpanderActive = true
+local EspActive = true
+local AutoGenActive = true
+local AutoTpGenActive = false
+local AutoSkillCheckActive = true -- FITUR BARU
 
 -- ==========================================
--- 🛠️ PEMBUATAN UI (GUI)
+-- 🛠️ UPDATE UI INTERFACE V3
 -- ==========================================
 local ScreenGui = Instance.new("ScreenGui")
 local MainFrame = Instance.new("Frame")
 local Title = Instance.new("TextLabel")
 local SizeLabel = Instance.new("TextLabel")
 local SizeInput = Instance.new("TextBox")
-local ToggleButton = Instance.new("TextButton")
-local TransButton = Instance.new("TextButton")
 
--- Setup Main ScreenGui (Biar aman dari reset saat mati)
-ScreenGui.Name = "HitboxGui_Evomon"
+ScreenGui.Name = "ViolenceDistrict_HubV3"
 ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 ScreenGui.ResetOnSpawn = false
 
--- Frame Utama
 MainFrame.Name = "MainFrame"
 MainFrame.Parent = ScreenGui
-MainFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
-MainFrame.Position = UDim2.new(0.05, 0, 0.3, 0)
-MainFrame.Size = UDim2.new(0, 220, 0, 180)
+MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+MainFrame.Position = UDim2.new(0.05, 0, 0.2, 0)
+MainFrame.Size = UDim2.new(0, 240, 0, 330) -- UI Diperbesar untuk 5 tombol
 MainFrame.Active = true
-MainFrame.Draggable = true -- UI bisa digeser-geser di layar
+MainFrame.Draggable = true
+Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 10)
 
--- Efek Sudut UI Bulat
-local Corner = Instance.new("UICorner")
-Corner.CornerRadius = UDim.new(0, 10)
-Corner.Parent = MainFrame
-
--- Judul UI
-Title.Name = "Title"
 Title.Parent = MainFrame
 Title.BackgroundTransparency = 1
 Title.Size = UDim2.new(1, 0, 0, 35)
 Title.Font = Enum.Font.SourceSansBold
-Title.Text = "EVOMON HITBOX CONTROL"
-Title.TextColor3 = Color3.fromRGB(255, 215, 0)
-Title.TextSize = 16
+Title.Text = "VIOLENCE DISTRICT V3"
+Title.TextColor3 = Color3.fromRGB(255, 50, 50)
+Title.TextSize = 17
 
--- Label Ukuran
-SizeLabel.Name = "SizeLabel"
-SizeLabel.Parent = MainFrame
-SizeLabel.BackgroundTransparency = 1
-SizeLabel.Position = UDim2.new(0, 15, 0, 45)
-SizeLabel.Size = UDim2.new(0, 100, 0, 30)
-SizeLabel.Font = Enum.Font.SourceSans
-SizeLabel.Text = "Ukuran Hitbox:"
-SizeLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-SizeLabel.TextSize = 14
-SizeLabel.TextXAlignment = Enum.TextXAlignment.Left
+-- Input Hitbox Size
+SizeLabel.Parent = MainFrame; SizeLabel.BackgroundTransparency = 1
+SizeLabel.Position = UDim2.new(0, 15, 0, 45); SizeLabel.Size = UDim2.new(0, 100, 0, 30)
+SizeLabel.Font = Enum.Font.SourceSans; SizeLabel.Text = "Hitbox Size:"; SizeLabel.TextColor3 = Color3.fromRGB(255, 255, 255); SizeLabel.TextSize = 14; SizeLabel.TextXAlignment = Enum.TextXAlignment.Left
 
--- Kotak Input Ukuran (TextBox)
-SizeInput.Name = "SizeInput"
-SizeInput.Parent = MainFrame
-SizeInput.BackgroundColor3 = Color3.fromRGB(50, 50, 55)
-SizeInput.Position = UDim2.new(0, 120, 0, 47)
-SizeInput.Size = UDim2.new(0, 80, 0, 25)
-SizeInput.Font = Enum.Font.SourceSansBold
-SizeInput.Text = tostring(HitboxSize)
-SizeInput.TextColor3 = Color3.fromRGB(0, 255, 127)
-SizeInput.TextSize = 14
+SizeInput.Parent = MainFrame; SizeInput.BackgroundColor3 = Color3.fromRGB(50, 50, 55)
+SizeInput.Position = UDim2.new(0, 130, 0, 47); SizeInput.Size = UDim2.new(0, 95, 0, 25)
+SizeInput.Font = Enum.Font.SourceSansBold; SizeInput.Text = tostring(HitboxSize); SizeInput.TextColor3 = Color3.fromRGB(0, 255, 127); SizeInput.TextSize = 14
+Instance.new("UICorner", SizeInput).CornerRadius = UDim.new(0, 5)
 
-local InputCorner = Instance.new("UICorner")
-InputCorner.CornerRadius = UDim.new(0, 5)
-InputCorner.Parent = SizeInput
+-- Macro Pembuat Tombol
+local function createButton(name, text, yPos, color)
+    local btn = Instance.new("TextButton")
+    btn.Name = name
+    btn.Parent = MainFrame
+    btn.BackgroundColor3 = color
+    btn.Position = UDim2.new(0, 15, 0, yPos)
+    btn.Size = UDim2.new(0, 210, 0, 35)
+    btn.Font = Enum.Font.SourceSansBold
+    btn.Text = text
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.TextSize = 13
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 5)
+    return btn
+end
 
--- Tombol Aktif / Nonaktif
-ToggleButton.Name = "ToggleButton"
-ToggleButton.Parent = MainFrame
-ToggleButton.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
-ToggleButton.Position = UDim2.new(0, 15, 0, 90)
-ToggleButton.Size = UDim2.new(0, 190, 0, 30)
-ToggleButton.Font = Enum.Font.SourceSansBold
-ToggleButton.Text = "STATUS: ACTIVE"
-ToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-ToggleButton.TextSize = 14
-
-local BtnCorner1 = Instance.new("UICorner")
-BtnCorner1.CornerRadius = UDim.new(0, 5)
-BtnCorner1.Parent = ToggleButton
-
--- Tombol Transparansi Kotak
-TransButton.Name = "TransButton"
-TransButton.Parent = MainFrame
-TransButton.BackgroundColor3 = Color3.fromRGB(70, 70, 80)
-TransButton.Position = UDim2.new(0, 15, 0, 130)
-TransButton.Size = UDim2.new(0, 190, 0, 30)
-TransButton.Font = Enum.Font.SourceSans
-TransButton.Text = "Mode Kotak: Terlihat (0.7)"
-TransButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-TransButton.TextSize = 14
-
-local BtnCorner2 = Instance.new("UICorner")
-BtnCorner2.CornerRadius = UDim.new(0, 5)
-BtnCorner2.Parent = TransButton
+local HitboxToggle = createButton("HitboxToggle", "HITBOX EXPANDER: ON", 90, Color3.fromRGB(0, 170, 0))
+local EspToggle = createButton("EspToggle", "PLAYER ESP: ON", 135, Color3.fromRGB(0, 170, 0))
+local GenToggle = createButton("GenToggle", "PROXIMITY AUTO-HOLD: ON", 180, Color3.fromRGB(0, 170, 0))
+local TpGenToggle = createButton("TpGenToggle", "AUTO TP GENERATOR: OFF", 225, Color3.fromRGB(170, 0, 0))
+local SkillCheckToggle = createButton("SkillCheckToggle", "AUTO SKILL CHECK: ON", 270, Color3.fromRGB(0, 170, 0)) -- TOMBOL BARU
 
 -- ==========================================
--- ⚡ LOGIKA & FUNGSI UTAMA (HITBOX)
+-- ⚡ LOGIKA TOMBOL UI
 -- ==========================================
-
--- Fungsi merubah nilai ukuran saat kamu ketik di UI
-SizeInput.FocusLost:Connect(function(enterPressed)
+SizeInput.FocusLost:Connect(function()
     local val = tonumber(SizeInput.Text)
-    if val then
-        HitboxSize = val
-        print("[HITBOX] Ukuran diubah menjadi: " .. val)
-    else
-        SizeInput.Text = tostring(HitboxSize)
-    end
+    if val then HitboxSize = val else SizeInput.Text = tostring(HitboxSize) end
 end)
 
--- Fungsi tombol ON/OFF
-ToggleButton.MouseButton1Click:Connect(function()
-    ExpanderActive = not ExpanderActive
-    if ExpanderActive then
-        ToggleButton.Text = "STATUS: ACTIVE"
-        ToggleButton.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
-    else
-        ToggleButton.Text = "STATUS: DISABLED"
-        ToggleButton.BackgroundColor3 = Color3.fromRGB(170, 0, 0)
-    end
-end)
+local function toggleLogic(btn, stateVar, textPrefix)
+    stateVar = not stateVar
+    btn.Text = stateVar and (textPrefix .. ": ON") or (textPrefix .. ": OFF")
+    btn.BackgroundColor3 = stateVar and Color3.fromRGB(0, 170, 0) or Color3.fromRGB(170, 0, 0)
+    return stateVar
+end
 
--- Fungsi tombol Ganti Transparansi
-TransButton.MouseButton1Click:Connect(function()
-    IsTransparent = not IsTransparent
-    if IsTransparent then
-        TransButton.Text = "Mode Kotak: Terlihat (0.7)"
-    else
-        TransButton.Text = "Mode Kotak: Bening (1.0)"
-    end
-end)
+HitboxToggle.MouseButton1Click:Connect(function() ExpanderActive = toggleLogic(HitboxToggle, ExpanderActive, "HITBOX EXPANDER") end)
+EspToggle.MouseButton1Click:Connect(function() EspActive = toggleLogic(EspToggle, EspActive, "PLAYER ESP") end)
+GenToggle.MouseButton1Click:Connect(function() AutoGenActive = toggleLogic(GenToggle, AutoGenActive, "PROXIMITY AUTO-HOLD") end)
+TpGenToggle.MouseButton1Click:Connect(function() AutoTpGenActive = toggleLogic(TpGenToggle, AutoTpGenActive, "AUTO TP GENERATOR") end)
+SkillCheckToggle.MouseButton1Click:Connect(function() AutoSkillCheckActive = toggleLogic(SkillCheckToggle, AutoSkillCheckActive, "AUTO SKILL CHECK") end)
 
--- LOOP UTAMA: Otomatis memperbesar part 'HumanoidRootPart' Mob/Musuh di sekitar
-RunService.RenderStepped:Connect(function()
-    if not ExpanderActive then return end
-    
-    -- Mencari folder Workspace tempat monster/mob berada di game Evomon
-    local workspaceChildren = workspace:GetChildren()
-    
-    for _, object in ipairs(workspaceChildren) do
-        -- Validasi apakah objek tersebut adalah Mob/NPC/Player lain yang memiliki nyawa
-        if object:IsA("Model") and object ~= LocalPlayer.Character and object:FindFirstChild("Humanoid") then
-            local rootPart = object:FindFirstChild("HumanoidRootPart")
-            
-            if rootPart then
-                pcall(function()
-                    rootPart.Size = Vector3.new(HitboxSize, HitboxSize, HitboxSize)
-                    rootPart.CanCollide = false -- Biar karakter kamu ga mental/tabrakan saat mendekat
-                    
-                    if IsTransparent then
-                        rootPart.Transparency = 0.7 -- Kelihatan merah/kotak samar-samar
-                        rootPart.Color = Color3.fromRGB(255, 0, 0) -- Diwarnai merah biar gampang dipukul
-                    else
-                        rootPart.Transparency = 1.0 -- Bening total
-                    end
-                end)
+-- ==========================================
+-- 🎯 FITUR BARU: AUTO SKILL CHECK (BYPASS)
+-- ==========================================
+-- Skenario 1: Memanipulasi RemoteEvent (Anti-Meledak)
+if not getgenv().SkillCheckHooked then
+    getgenv().SkillCheckHooked = true
+    local oldNamecall
+    oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+        local method = getnamecallmethod()
+        local args = {...}
+        
+        -- Mencegat data yang dikirim ke server saat skill check terjadi
+        if AutoSkillCheckActive and method == "FireServer" then
+            local remoteName = tostring(self.Name):lower()
+            if remoteName:find("skill") or remoteName:find("check") or remoteName:find("qte") or remoteName:find("repair") then
+                -- Memaksa argumen pertama menjadi true (Sukses) agar server tidak meledakkan generator
+                if type(args[1]) == "boolean" then
+                    args[1] = true
+                end
+                return oldNamecall(self, unpack(args))
             end
+        end
+        return oldNamecall(self, ...)
+    end)
+end
+
+-- Skenario 2: Auto-Press Spacebar (Backup System)
+-- Jika game menggunakan deteksi murni UI lokal, ini akan otomatis menekan spasi
+task.spawn(function()
+    while task.wait(0.1) do
+        if AutoSkillCheckActive then
+            pcall(function()
+                local gui = LocalPlayer:FindFirstChild("PlayerGui")
+                if gui then
+                    -- Mendeteksi munculnya elemen UI baru di layar
+                    for _, element in ipairs(gui:GetDescendants()) do
+                        if element:IsA("TextLabel") or element:IsA("ImageLabel") then
+                            local name = element.Name:lower()
+                            -- Mencari kata kunci jarum/skillcheck/spacebar
+                            if name:find("skillcheck") or name:find("needle") or name:find("qte") or name:find("space") then
+                                if element.Visible or element.Parent.Visible then
+                                    -- Menyimulasikan penekanan Spacebar super cepat
+                                    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Space, false, game)
+                                    task.wait(0.05)
+                                    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Space, false, game)
+                                    task.wait(0.5) -- Jeda agar tidak spam
+                                end
+                            end
+                        end
+                    end
+                end
+            end)
         end
     end
 end)
 
-print("[HITBOX] Script & UI Berhasil Dijalankan!")
+-- ==========================================
+-- 🛡️ SENSOR RADAR (ANTI TEMBOK) & AUTO TP
+-- ==========================================
+local function isPointSafeFromWalls(pointPart, genModel)
+    if not pointPart or not pointPart:IsA("BasePart") then return false end
+    local params = OverlapParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    local ignoreList = {LocalPlayer.Character, genModel}
+    for _, p in ipairs(Players:GetPlayers()) do if p.Character then table.insert(ignoreList, p.Character) end end
+    params.FilterDescendantsInstances = ignoreList
+    local checkSize = pointPart.Size + Vector3.new(1.5, 2, 1.5)
+    local overlappingParts = workspace:GetPartBoundsInBox(pointPart.CFrame, checkSize, params)
+    for _, part in ipairs(overlappingParts) do
+        if part.CanCollide and part.Transparency < 1 then return false end
+    end
+    return true
+end
 
+task.spawn(function()
+    while task.wait(1) do
+        if AutoTpGenActive then
+            pcall(function()
+                local generatorsFolder = workspace:FindFirstChild("Map") and workspace.Map:FindFirstChild("Generators")
+                if generatorsFolder then
+                    for _, generator in ipairs(generatorsFolder:GetChildren()) do
+                        if not AutoTpGenActive then break end
+                        local safePoint = nil
+                        for _, child in ipairs(generator:GetChildren()) do
+                            if child.Name:find("GeneratorPoint") and isPointSafeFromWalls(child, generator) then
+                                safePoint = child
+                                break
+                            end
+                        end
+                        if safePoint then
+                            local char = LocalPlayer.Character
+                            local root = char and char:FindFirstChild("HumanoidRootPart")
+                            if root then
+                                root.CFrame = safePoint.CFrame * CFrame.new(0, 0.5, 0)
+                                task.wait(0.4)
+                                local hitbox = generator:FindFirstChild("HitBox")
+                                local prompt = (hitbox and hitbox:FindFirstChildWhichIsA("ProximityPrompt", true)) or generator:FindFirstChildWhichIsA("ProximityPrompt", true)
+                                if prompt and prompt.Enabled then
+                                    local holdTime = math.max(prompt.HoldDuration, 4)
+                                    fireproximityprompt(prompt)
+                                    task.wait(holdTime)
+                                end
+                            end
+                        end
+                    end
+                end
+            end)
+        end
+    end
+end)
+
+-- ==========================================
+-- 👁️ WORKER UNTUK ESP & HITBOX
+-- ==========================================
+local function createEsp(player)
+    local Box = Instance.new("BoxHandleAdornment")
+    local NameTag = Instance.new("BillboardGui")
+    local NameLabel = Instance.new("TextLabel")
+    local function applyEsp(char)
+        local root = char:WaitForChild("HumanoidRootPart", 5)
+        if not root then return end
+        Box.Name = "EspBox"; Box.Parent = root; Box.Adornee = root; Box.AlwaysOnTop = true; Box.ZIndex = 10; Box.Size = Vector3.new(4, 6, 4); Box.Transparency = 0.5; Box.Color3 = Color3.fromRGB(255, 0, 0)
+        NameTag.Name = "EspTag"; NameTag.Parent = root; NameTag.Adornee = root; NameTag.AlwaysOnTop = true; NameTag.Size = UDim2.new(0, 100, 0, 30); NameTag.StudsOffset = Vector3.new(0, 4, 0)
+        NameLabel.Parent = NameTag; NameLabel.BackgroundTransparency = 1; NameLabel.Size = UDim2.new(1, 0, 1, 0); NameLabel.Text = player.Name; NameLabel.Font = Enum.Font.SourceSansBold; NameLabel.TextColor3 = Color3.fromRGB(255, 255, 255); NameLabel.TextSize = 14
+    end
+    if player.Character then applyEsp(player.Character) end
+    player.CharacterAdded:Connect(applyEsp)
+    RunService.RenderStepped:Connect(function() Box.Visible = EspActive; NameTag.Enabled = EspActive end)
+end
+for _, p in ipairs(Players:GetPlayers()) do if p ~= LocalPlayer then createEsp(p) end end
+Players.PlayerAdded:Connect(function(p) if p ~= LocalPlayer then createEsp(p) end end)
+
+RunService.RenderStepped:Connect(function()
+    if not ExpanderActive then return end
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character then
+            local root = p.Character:FindFirstChild("HumanoidRootPart")
+            if root then pcall(function() root.Size = Vector3.new(HitboxSize, HitboxSize, HitboxSize); root.CanCollide = false end) end
+        end
+    end
+end)
+
+print("[SUCCESS] Violence District V3 Hub with Perfect QTE Loaded!")
