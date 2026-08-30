@@ -4,25 +4,36 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
 
-print("⚙️ Memulai Ultimate Black Screen & Auto Hop...")
+-- UI Element Global Variable
+local statusText
 
 -- ==========================================
--- 1. EXTREME BLACK SCREEN & KILL TEXTURE
+-- 1. EXTREME BLACK SCREEN DENGAN LIVE TIMER
 -- ==========================================
 local function ultimateBlackScreen()
     pcall(function() RunService:Set3dRenderingEnabled(false) end)
     settings().Rendering.QualityLevel = 1
 
     local blackScreen = Instance.new("ScreenGui")
-    blackScreen.Name = "AFK_BlackScreen"
+    blackScreen.Name = "Hanz_AFK_Screen"
     blackScreen.IgnoreGuiInset = true
     blackScreen.ResetOnSpawn = false
     
     local frame = Instance.new("Frame")
-    frame.BackgroundColor3 = Color3.new(0, 0, 0)
+    frame.BackgroundColor3 = Color3.new(0.05, 0.05, 0.05) -- Hitam pekat dengan sedikit abu agar teks kontras
     frame.Size = UDim2.new(1, 0, 1, 0)
     frame.ZIndex = 999999999
     frame.Parent = blackScreen
+    
+    -- Membuat Teks Timer di tengah layar
+    statusText = Instance.new("TextLabel")
+    statusText.Size = UDim2.new(1, 0, 1, 0)
+    statusText.BackgroundTransparency = 1
+    statusText.TextColor3 = Color3.new(0, 1, 0) -- Warna hijau neon
+    statusText.TextSize = 24
+    statusText.Font = Enum.Font.Code
+    statusText.Text = "Hanz AFK System Menunggu..."
+    statusText.Parent = frame
     
     local success = pcall(function() blackScreen.Parent = game:GetService("CoreGui") end)
     if not success then
@@ -32,9 +43,6 @@ local function ultimateBlackScreen()
     Lighting.Brightness = 0
     Lighting.ClockTime = 0
     Lighting.FogEnd = 0
-    Lighting.FogColor = Color3.new(0, 0, 0)
-    Lighting.Ambient = Color3.new(0, 0, 0)
-    Lighting.OutdoorAmbient = Color3.new(0, 0, 0)
     Lighting.GlobalShadows = false
 
     local function killObject(obj)
@@ -43,8 +51,6 @@ local function ultimateBlackScreen()
         elseif obj:IsA("BasePart") then
             obj.Transparency = 1 
             obj.Material = Enum.Material.SmoothPlastic
-            obj.CastShadow = false
-            obj.Reflectance = 0
         end
     end
 
@@ -52,18 +58,62 @@ local function ultimateBlackScreen()
     Workspace.DescendantAdded:Connect(function(obj) killObject(obj) end)
     
     local terrain = Workspace:FindFirstChildOfClass("Terrain")
-    if terrain then
-        terrain.WaterWaveSize = 0
-        terrain.WaterWaveSpeed = 0
-        terrain.WaterReflectance = 0
-        terrain.WaterTransparency = 1
-        terrain:Clear()
-    end
+    if terrain then terrain:Clear() end
 end
 
 ultimateBlackScreen()
-print("✅ Black Screen & Kill Texture Selesai!")
 
+-- ==========================================
+-- 2. AUTO JOIN & LIVE TIMER COUNTDOWN (45 MNT)
+-- ==========================================
+task.wait(3)
+
+local function teleportToPrivateServer()
+    if statusText then statusText.Text = "Status: Teleporting ke Private Server..." end
+    local success = pcall(function()
+        local remotes = ReplicatedStorage:WaitForChild("Remotes", 10)
+        local afkTeleport = remotes:WaitForChild("AFKTeleport", 10)
+        if afkTeleport then afkTeleport:FireServer("PrivateServer") end
+    end)
+end
+
+local isPrivateServer = game.PrivateServerId ~= "" and game.PrivateServerId ~= nil
+
+if not isPrivateServer then
+    teleportToPrivateServer()
+end
+
+-- Sistem Timer Bergerak (Bukti game tidak freeze/crash)
+task.spawn(function()
+    local hopTime = 2700 -- 45 Menit dalam detik
+    local timeRemaining = hopTime
+    
+    while true do
+        task.wait(1)
+        timeRemaining = timeRemaining - 1
+        
+        -- Konversi detik ke format Menit:Detik
+        local minutes = math.floor(timeRemaining / 60)
+        local seconds = timeRemaining % 60
+        
+        -- Update UI setiap detik
+        if statusText then
+            statusText.Text = string.format(
+                "Hanz AFK System Active [NO CRASH]\nServer: %s\nNext Hop dalam: %02d:%02d", 
+                (isPrivateServer and "Private" or "Public -> Hopping"), 
+                minutes, 
+                seconds
+            )
+        end
+        
+        -- Eksekusi Hop saat timer habis
+        if timeRemaining <= 0 then
+            teleportToPrivateServer()
+            timeRemaining = hopTime -- Reset timer ke 45 menit lagi
+            task.wait(5) -- Jeda agar tidak spam teleport
+        end
+    end
+end)
 -- ==========================================
 -- 2. AUTO JOIN & LOOP HOP PRIVATE SERVER
 -- ==========================================
