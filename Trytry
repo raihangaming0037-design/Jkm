@@ -4,11 +4,11 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
 
--- UI Element Global Variable
 local statusText
+local isTeleporting = false -- Mencegah spam RemoteEvent
 
 -- ==========================================
--- 1. EXTREME BLACK SCREEN DENGAN LIVE TIMER
+-- 1. EXTREME BLACK SCREEN GUI
 -- ==========================================
 local function ultimateBlackScreen()
     pcall(function() RunService:Set3dRenderingEnabled(false) end)
@@ -20,16 +20,15 @@ local function ultimateBlackScreen()
     blackScreen.ResetOnSpawn = false
     
     local frame = Instance.new("Frame")
-    frame.BackgroundColor3 = Color3.new(0.05, 0.05, 0.05) -- Hitam pekat dengan sedikit abu agar teks kontras
+    frame.BackgroundColor3 = Color3.new(0.05, 0.05, 0.05)
     frame.Size = UDim2.new(1, 0, 1, 0)
     frame.ZIndex = 999999999
     frame.Parent = blackScreen
     
-    -- Membuat Teks Timer di tengah layar
     statusText = Instance.new("TextLabel")
     statusText.Size = UDim2.new(1, 0, 1, 0)
     statusText.BackgroundTransparency = 1
-    statusText.TextColor3 = Color3.new(0, 1, 0) -- Warna hijau neon
+    statusText.TextColor3 = Color3.new(0, 1, 0)
     statusText.TextSize = 24
     statusText.Font = Enum.Font.Code
     statusText.Text = "Hanz AFK System Menunggu..."
@@ -64,95 +63,61 @@ end
 ultimateBlackScreen()
 
 -- ==========================================
--- 2. AUTO JOIN & LIVE TIMER COUNTDOWN (45 MNT)
+-- 2. LOGIKA PLAYER COUNT & AUTO HOP
 -- ==========================================
 task.wait(3)
 
 local function teleportToPrivateServer()
-    if statusText then statusText.Text = "Status: Teleporting ke Private Server..." end
-    local success = pcall(function()
+    if isTeleporting then return end
+    isTeleporting = true -- Kunci fungsi agar tidak spam request
+    
+    if statusText then statusText.Text = "🚀 Teleporting ke server baru..." end
+    
+    pcall(function()
         local remotes = ReplicatedStorage:WaitForChild("Remotes", 10)
         local afkTeleport = remotes:WaitForChild("AFKTeleport", 10)
         if afkTeleport then afkTeleport:FireServer("PrivateServer") end
     end)
+    
+    task.wait(10) -- Jeda 10 detik menunggu loading game baru
+    isTeleporting = false
 end
 
-local isPrivateServer = game.PrivateServerId ~= "" and game.PrivateServerId ~= nil
-
-if not isPrivateServer then
-    teleportToPrivateServer()
-end
-
--- Sistem Timer Bergerak (Bukti game tidak freeze/crash)
 task.spawn(function()
-    local hopTime = 2700 -- 45 Menit dalam detik
+    local hopTime = 2700 -- 45 Menit
     local timeRemaining = hopTime
     
     while true do
         task.wait(1)
-        timeRemaining = timeRemaining - 1
         
-        -- Konversi detik ke format Menit:Detik
-        local minutes = math.floor(timeRemaining / 60)
-        local seconds = timeRemaining % 60
-        
-        -- Update UI setiap detik
-        if statusText then
-            statusText.Text = string.format(
-                "Hanz AFK System Active [NO CRASH]\nServer: %s\nNext Hop dalam: %02d:%02d", 
-                (isPrivateServer and "Private" or "Public -> Hopping"), 
-                minutes, 
-                seconds
-            )
-        end
-        
-        -- Eksekusi Hop saat timer habis
-        if timeRemaining <= 0 then
+        -- Cek jika ada pemain lain di dalam server (Lebih dari 1 orang)
+        if #Players:GetPlayers() > 1 then
+            if statusText then
+                statusText.Text = "🚨 Hanz System: Terdeteksi pemain lain! Auto Hop dipicu..."
+            end
             teleportToPrivateServer()
-            timeRemaining = hopTime -- Reset timer ke 45 menit lagi
-            task.wait(5) -- Jeda agar tidak spam teleport
-        end
-    end
-end)
--- ==========================================
--- 2. AUTO JOIN & LOOP HOP PRIVATE SERVER
--- ==========================================
-task.wait(3)
-
-local function teleportToPrivateServer()
-    local success, err = pcall(function()
-        local remotes = ReplicatedStorage:WaitForChild("Remotes", 10)
-        local afkTeleport = remotes:WaitForChild("AFKTeleport", 10)
-        
-        if afkTeleport then
-            afkTeleport:FireServer("PrivateServer")
-            print("🚀 RemoteEvent AFKTeleport berhasil dikirim!")
+            timeRemaining = hopTime -- Reset timer saat pindah
+            
         else
-            warn("❌ RemoteEvent 'AFKTeleport' tidak ditemukan!")
+            -- Jika sendirian (hanya 1 orang), Timer 45 Menit berjalan
+            timeRemaining = timeRemaining - 1
+            
+            local minutes = math.floor(timeRemaining / 60)
+            local seconds = timeRemaining % 60
+            
+            if statusText then
+                statusText.Text = string.format(
+                    "Hanz AFK System Active [NO CRASH]\nServer: Solo Player (Aman)\nNext Hop dalam: %02d:%02d", 
+                    minutes, 
+                    seconds
+                )
+            end
+            
+            -- Jika waktu 45 menit habis
+            if timeRemaining <= 0 then
+                teleportToPrivateServer()
+                timeRemaining = hopTime -- Reset timer ke 45 menit lagi
+            end
         end
-    end)
-    
-    if not success then
-        warn("❌ Error saat teleport: " .. tostring(err))
-    end
-end
-
--- Pengecekan pertama saat script dijalankan
-local isPrivateServer = game.PrivateServerId ~= "" and game.PrivateServerId ~= nil
-
-if not isPrivateServer then
-    print("⏳ Berada di Server Publik! Mengeksekusi teleport pertama...")
-    teleportToPrivateServer()
-else
-    print("✅ Kamu sudah berada di Private Server.")
-end
-
--- Thread terpisah untuk Auto Hop setiap 45 Menit
-task.spawn(function()
-    while true do
-        -- 45 Menit = 45 * 60 = 2700 detik
-        task.wait(270) 
-        print("🔄 45 Menit berlalu! Melakukan Auto Hop untuk menyegarkan server...")
-        teleportToPrivateServer()
     end
 end)
