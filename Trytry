@@ -7,80 +7,177 @@ local CoreGui = game:GetService("CoreGui")
 
 local statusText
 local isTeleporting = false
+local systemEnabled = true -- Status utama sistem hanzxs
+local originalSettings = {} -- Menyimpan pengaturan asli sebelum optimasi
+local isOptimized = false
 
 -- ==========================================
--- 1. EXTREME BLACK SCREEN & FIX GUI ZINDEX
+-- 0. SIMPAN PENGATURAN ASLI (Untuk Fitur OFF)
 -- ==========================================
-local function ultimateBlackScreen()
-    pcall(function() RunService:Set3dRenderingEnabled(false) end)
-    settings().Rendering.QualityLevel = 1
+local function saveOriginalSettings()
+    originalSettings.GlobalShadows = Lighting.GlobalShadows
+    originalSettings.Brightness = Lighting.Brightness
+    originalSettings.ClockTime = Lighting.ClockTime
+    originalSettings.FogEnd = Lighting.FogEnd
+    originalSettings.QualityLevel = settings().Rendering.QualityLevel
+end
+saveOriginalSettings()
 
-    local blackScreen = Instance.new("ScreenGui")
-    blackScreen.Name = "hanzxs_AFK_Screen"
-    blackScreen.IgnoreGuiInset = true
-    blackScreen.ResetOnSpawn = false
+-- ==========================================
+-- 1. FUNGSI UI & BLACK SCREEN
+-- ==========================================
+local function createUI()
+    -- Pastikan UI lama terhapus jika ada
+    if CoreGui:FindFirstChild("hanzxs_AFK_Screen") then
+        CoreGui.hanzxs_AFK_Screen:Destroy()
+    end
+    if Players.LocalPlayer:WaitForChild("PlayerGui"):FindFirstChild("hanzxs_AFK_Screen") then
+        Players.LocalPlayer.PlayerGui.hanzxs_AFK_Screen:Destroy()
+    end
+
+    local mainGui = Instance.new("ScreenGui")
+    mainGui.Name = "hanzxs_AFK_Screen"
+    mainGui.IgnoreGuiInset = true
+    mainGui.ResetOnSpawn = false
     
+    -- Latar Hitam (Hanya muncul jika di-ON-kan)
     local frame = Instance.new("Frame")
+    frame.Name = "BlackScreenFrame"
     frame.BackgroundColor3 = Color3.new(0.05, 0.05, 0.05)
     frame.Size = UDim2.new(1, 0, 1, 0)
     frame.ZIndex = 999999 
-    frame.Parent = blackScreen
+    frame.Visible = systemEnabled
+    frame.Parent = mainGui
     
+    -- Teks Status
     statusText = Instance.new("TextLabel")
     statusText.Size = UDim2.new(1, 0, 1, 0)
     statusText.BackgroundTransparency = 1
     statusText.TextColor3 = Color3.new(0, 1, 0)
     statusText.TextSize = 35
     statusText.Font = Enum.Font.Code
-    statusText.ZIndex = 1000000 -- Memaksa teks tampil di atas frame hitam
+    statusText.ZIndex = 1000000 
     statusText.Text = "hanzxs AFK System Menunggu..."
     statusText.Parent = frame
+
+    -- Tombol ON/OFF (Mengambang agar bisa diklik)
+    local toggleBtn = Instance.new("TextButton")
+    toggleBtn.Size = UDim2.new(0, 150, 0, 50)
+    toggleBtn.Position = UDim2.new(1, -160, 1, -60) -- Pojok kanan bawah
+    toggleBtn.BackgroundColor3 = Color3.new(0.2, 0.2, 0.2)
+    toggleBtn.TextColor3 = Color3.new(1, 1, 1)
+    toggleBtn.Font = Enum.Font.GothamBold
+    toggleBtn.TextSize = 20
+    toggleBtn.Text = systemEnabled and "hanzxs: ON" or "hanzxs: OFF"
+    toggleBtn.ZIndex = 1000001
+    toggleBtn.Parent = mainGui
     
-    -- Memastikan GUI dijamin terpasang
-    local success = pcall(function() 
-        blackScreen.Parent = CoreGui 
-    end)
+    -- Sudut tumpul tombol
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = toggleBtn
+
+    local success = pcall(function() mainGui.Parent = CoreGui end)
+    if not success then mainGui.Parent = Players.LocalPlayer:WaitForChild("PlayerGui") end
+
+    return mainGui, frame, toggleBtn
+end
+
+local gui, blackFrame, toggleButton = createUI()
+
+-- ==========================================
+-- 2. LOGIKA OPTIMASI (ON) & RESTORE (OFF)
+-- ==========================================
+local function toggleOptimization(state)
+    isOptimized = state
     
-    if not success then
-        local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui", 10)
-        if playerGui then
-            blackScreen.Parent = playerGui
+    -- Mengatur Tampilan Latar Hitam
+    blackFrame.Visible = state
+    
+    if state then
+        -- MODE ON (Matikan Render)
+        pcall(function() RunService:Set3dRenderingEnabled(false) end)
+        settings().Rendering.QualityLevel = 1
+        Lighting.Brightness = 0
+        Lighting.ClockTime = 0
+        Lighting.FogEnd = 0
+        Lighting.GlobalShadows = false
+        
+        -- Catatan: Untuk Kill Object yang sudah dihapus (Destroy), tidak bisa dikembalikan.
+        -- Ini hanya men-transparansikan part yang masih ada.
+        for _, obj in pairs(Workspace:GetDescendants()) do
+            if obj:IsA("BasePart") then
+                obj.Transparency = 1 
+            end
+        end
+    else
+        -- MODE OFF (Hidupkan Kembali Render)
+        pcall(function() RunService:Set3dRenderingEnabled(true) end)
+        settings().Rendering.QualityLevel = originalSettings.QualityLevel
+        Lighting.Brightness = originalSettings.Brightness
+        Lighting.ClockTime = originalSettings.ClockTime
+        Lighting.FogEnd = originalSettings.FogEnd
+        Lighting.GlobalShadows = originalSettings.GlobalShadows
+        
+        -- Kembalikan transparansi part agar terlihat lagi
+        for _, obj in pairs(Workspace:GetDescendants()) do
+            if obj:IsA("BasePart") then
+                obj.Transparency = 0 
+            end
         end
     end
+end
 
-    Lighting.Brightness = 0
-    Lighting.ClockTime = 0
-    Lighting.FogEnd = 0
-    Lighting.GlobalShadows = false
-
+-- Eksekusi pertama kali jika sistem menyala
+if systemEnabled then
+    toggleOptimization(true)
+    
+    -- Eksekusi Kill Texture secara permanen (hanya jalan sekali saat script dieksekusi)
     local function killObject(obj)
         if obj:IsA("Decal") or obj:IsA("Texture") or obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") or obj:IsA("ShirtGraphic") or obj:IsA("Clothing") then
             pcall(function() obj:Destroy() end)
         elseif obj:IsA("BasePart") then
-            obj.Transparency = 1 
             obj.Material = Enum.Material.SmoothPlastic
         end
     end
-
     for _, obj in pairs(Workspace:GetDescendants()) do killObject(obj) end
-    Workspace.DescendantAdded:Connect(function(obj) killObject(obj) end)
-    
+    Workspace.DescendantAdded:Connect(function(obj) if systemEnabled then killObject(obj) end end)
     local terrain = Workspace:FindFirstChildOfClass("Terrain")
     if terrain then terrain:Clear() end
 end
 
-ultimateBlackScreen()
+-- ==========================================
+-- 3. INTERAKSI TOMBOL ON / OFF
+-- ==========================================
+toggleButton.MouseButton1Click:Connect(function()
+    systemEnabled = not systemEnabled -- Membalikkan status (True -> False / False -> True)
+    
+    if systemEnabled then
+        toggleButton.Text = "hanzxs: ON"
+        toggleButton.BackgroundColor3 = Color3.new(0, 0.6, 0) -- Hijau saat ON
+        toggleOptimization(true)
+    else
+        toggleButton.Text = "hanzxs: OFF"
+        toggleButton.BackgroundColor3 = Color3.new(0.8, 0, 0) -- Merah saat OFF
+        toggleOptimization(false)
+        -- Mengosongkan teks status saat OFF agar tidak mengganggu layar
+        if statusText then statusText.Text = "" end 
+    end
+end)
+
+-- Set warna awal tombol
+toggleButton.BackgroundColor3 = systemEnabled and Color3.new(0, 0.6, 0) or Color3.new(0.8, 0, 0)
 
 -- ==========================================
--- 2. LOGIKA PLAYER COUNT & AUTO HOP hanzxs
+-- 4. LOGIKA AUTO HOP & TIMER hanzxs
 -- ==========================================
 task.wait(3)
 
 local function teleportToPrivateServer()
-    if isTeleporting then return end
+    if isTeleporting or not systemEnabled then return end
     isTeleporting = true 
     
-    if statusText then statusText.Text = "🚀 hanzxs System: Teleporting ke server baru..." end
+    if statusText and systemEnabled then statusText.Text = "🚀 hanzxs System: Teleporting ke server baru..." end
     
     pcall(function()
         local remotes = ReplicatedStorage:WaitForChild("Remotes", 10)
@@ -99,30 +196,36 @@ task.spawn(function()
     while true do
         task.wait(1)
         
-        if #Players:GetPlayers() > 1 then
-            if statusText then
-                statusText.Text = "🚨 hanzxs System: Terdeteksi pemain lain! Auto Hop dipicu..."
-            end
-            teleportToPrivateServer()
-            timeRemaining = hopTime 
-            
-        else
-            timeRemaining = timeRemaining - 1
-            local minutes = math.floor(timeRemaining / 60)
-            local seconds = timeRemaining % 60
-            
-            if statusText then
-                statusText.Text = string.format(
-                    "hanzxs AFK System Active\nServer: Solo Player\nNext Hop dalam: %02d:%02d", 
-                    minutes, 
-                    seconds
-                )
-            end
-            
-            if timeRemaining <= 0 then
+        -- Timer dan Auto Hop HANYA berjalan jika system di-ON-kan
+        if systemEnabled then
+            if #Players:GetPlayers() > 1 then
+                if statusText then
+                    statusText.Text = "🚨 hanzxs System: Terdeteksi pemain lain! Auto Hop dipicu..."
+                end
                 teleportToPrivateServer()
                 timeRemaining = hopTime 
+                
+            else
+                timeRemaining = timeRemaining - 1
+                local minutes = math.floor(timeRemaining / 60)
+                local seconds = timeRemaining % 60
+                
+                if statusText then
+                    statusText.Text = string.format(
+                        "hanzxs AFK System Active\nServer: Solo Player\nNext Hop dalam: %02d:%02d", 
+                        minutes, 
+                        seconds
+                    )
+                end
+                
+                if timeRemaining <= 0 then
+                    teleportToPrivateServer()
+                    timeRemaining = hopTime 
+                end
             end
+        else
+            -- Jika sistem OFF, timer dibekukan tapi tidak direset
+            if statusText then statusText.Text = "" end
         end
     end
 end)
