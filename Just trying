@@ -10,11 +10,10 @@ local HttpService = game:GetService("HttpService")
 -- ==========================================
 -- [ KONFIGURASI BLACKLIST ]
 -- ==========================================
--- Masukkan Username atau DisplayName player yang ingin dihindari di sini:
 local blacklistedPlayers = {
+    "KJNBGAKP10",
     "yuraty081",
-    "KJNAKP8",
-    "KJNAKP10"
+    "KJNBGAKP11"
 }
 
 local statusText
@@ -64,6 +63,232 @@ local function createUI()
     statusText.BackgroundTransparency = 1
     statusText.TextColor3 = Color3.new(0, 1, 0)
     statusText.TextSize = 35
+    statusText.Font = Enum.Font.Code
+    statusText.ZIndex = 1000000 
+    statusText.Text = "hanzxs System: Inisialisasi..."
+    statusText.Parent = frame
+
+    local toggleBtn = Instance.new("TextButton")
+    toggleBtn.Size = UDim2.new(0, 150, 0, 50)
+    toggleBtn.Position = UDim2.new(1, -160, 1, -60) 
+    toggleBtn.BackgroundColor3 = Color3.new(0.2, 0.2, 0.2)
+    toggleBtn.TextColor3 = Color3.new(1, 1, 1)
+    toggleBtn.Font = Enum.Font.GothamBold
+    toggleBtn.TextSize = 20
+    toggleBtn.Text = systemEnabled and "hanzxs: ON" or "hanzxs: OFF"
+    toggleBtn.ZIndex = 1000001
+    toggleBtn.Parent = mainGui
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = toggleBtn
+
+    local success = pcall(function() mainGui.Parent = CoreGui end)
+    if not success then mainGui.Parent = Players.LocalPlayer:WaitForChild("PlayerGui") end
+
+    return mainGui, frame, toggleBtn
+end
+
+local gui, blackFrame, toggleButton = createUI()
+
+-- ==========================================
+-- 2. LOGIKA OPTIMASI (ON) & RESTORE (OFF)
+-- ==========================================
+local function toggleOptimization(state)
+    isOptimized = state
+    blackFrame.Visible = state
+    
+    if state then
+        pcall(function() RunService:Set3dRenderingEnabled(false) end)
+        settings().Rendering.QualityLevel = 1
+        Lighting.Brightness = 0
+        Lighting.ClockTime = 0
+        Lighting.FogEnd = 0
+        Lighting.GlobalShadows = false
+        for _, obj in pairs(Workspace:GetDescendants()) do
+            if obj:IsA("BasePart") then obj.Transparency = 1 end
+        end
+    else
+        pcall(function() RunService:Set3dRenderingEnabled(true) end)
+        settings().Rendering.QualityLevel = originalSettings.QualityLevel
+        Lighting.Brightness = originalSettings.Brightness
+        Lighting.ClockTime = originalSettings.ClockTime
+        Lighting.FogEnd = originalSettings.FogEnd
+        Lighting.GlobalShadows = originalSettings.GlobalShadows
+        for _, obj in pairs(Workspace:GetDescendants()) do
+            if obj:IsA("BasePart") then obj.Transparency = 0 end
+        end
+    end
+end
+
+if systemEnabled then
+    toggleOptimization(true)
+    local function killObject(obj)
+        if obj:IsA("Decal") or obj:IsA("Texture") or obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") or obj:IsA("ShirtGraphic") or obj:IsA("Clothing") then
+            pcall(function() obj:Destroy() end)
+        elseif obj:IsA("BasePart") then
+            obj.Material = Enum.Material.SmoothPlastic
+        end
+    end
+    for _, obj in pairs(Workspace:GetDescendants()) do killObject(obj) end
+    Workspace.DescendantAdded:Connect(function(obj) if systemEnabled then killObject(obj) end end)
+    local terrain = Workspace:FindFirstChildOfClass("Terrain")
+    if terrain then terrain:Clear() end
+end
+
+toggleButton.MouseButton1Click:Connect(function()
+    systemEnabled = not systemEnabled 
+    
+    if systemEnabled then
+        toggleButton.Text = "hanzxs: ON"
+        toggleButton.BackgroundColor3 = Color3.new(0, 0.6, 0)
+        toggleOptimization(true)
+    else
+        toggleButton.Text = "hanzxs: OFF"
+        toggleButton.BackgroundColor3 = Color3.new(0.8, 0, 0)
+        toggleOptimization(false)
+        if statusText then statusText.Text = "" end 
+    end
+end)
+toggleButton.BackgroundColor3 = systemEnabled and Color3.new(0, 0.6, 0) or Color3.new(0.8, 0, 0)
+
+-- ==========================================
+-- 3. LOGIKA SERVER HOP (FIXED WITH ROPROXY)
+-- ==========================================
+local function serverHop()
+    if isTeleporting or not systemEnabled then return end
+    isTeleporting = true 
+    
+    if statusText and systemEnabled then 
+        statusText.Text = "🚀 hanzxs System: Mencari Server Publik Baru..." 
+    end
+
+    -- Universal HTTP Request Detector untuk Executor
+    local httpRequest = (syn and syn.request) or (http and http.request) or http_request or request or (fluxus and fluxus.request)
+    
+    local success = pcall(function()
+        local placeId = game.PlaceId
+        local currentJobId = game.JobId
+        -- Penggunaan roproxy.com agar tidak diblokir Roblox
+        local url = "https://games.roproxy.com/v1/games/" .. placeId .. "/servers/Public?sortOrder=Desc&limit=100"
+        
+        local responseBody = ""
+        if httpRequest then
+            local res = httpRequest({Url = url, Method = "GET"})
+            responseBody = res.Body
+        else
+            responseBody = game:HttpGet(url)
+        end
+        
+        local data = HttpService:JSONDecode(responseBody)
+        if data and data.data then
+            local validServers = {}
+            for _, server in ipairs(data.data) do
+                if type(server) == "table" and server.playing < server.maxPlayers and server.id ~= currentJobId then
+                    table.insert(validServers, server.id)
+                end
+            end
+            
+            -- Jika ditemukan server publik lain yang belum penuh
+            if #validServers > 0 then
+                local targetServerId = validServers[math.random(1, #validServers)]
+                TeleportService:TeleportToPlaceInstance(placeId, targetServerId, Players.LocalPlayer)
+                return
+            end
+        end
+        
+        -- Fallback 1: Jika list kosong/gagal parse API
+        TeleportService:Teleport(placeId, Players.LocalPlayer)
+    end)
+
+    if not success then
+        -- Fallback 2: Jika script mengalami error
+        pcall(function() TeleportService:Teleport(game.PlaceId, Players.LocalPlayer) end)
+    end
+    
+    task.wait(10)
+    isTeleporting = false
+end
+
+-- Reset status teleport jika gagal agar tidak 'stuck'
+TeleportService.TeleportInitFailed:Connect(function()
+    isTeleporting = false
+    if statusText and systemEnabled then
+        statusText.Text = "⚠️ Teleport Gagal! Mencoba ulang..."
+    end
+end)
+
+-- ==========================================
+-- 4. LOGIKA DETEKSI BLACKLIST & TIMER
+-- ==========================================
+local function checkBlacklist(player)
+    for _, name in ipairs(blacklistedPlayers) do
+        if string.lower(player.Name) == string.lower(name) or string.lower(player.DisplayName) == string.lower(name) then
+            return true
+        end
+    end
+    return false
+end
+
+-- Event Real-time saat ada pemain masuk
+Players.PlayerAdded:Connect(function(player)
+    if systemEnabled and checkBlacklist(player) then
+        if statusText then
+            statusText.Text = "🚨 BAHAYA: [" .. player.Name .. "] Masuk Server! Auto Hop..."
+        end
+        serverHop()
+    end
+end)
+
+task.spawn(function()
+    local hopTime = 2700 -- 45 Menit
+    local timeRemaining = hopTime
+    
+    while true do
+        task.wait(1)
+        
+        if systemEnabled then
+            local blacklistDetected = false
+            local badPlayerName = ""
+            
+            for _, player in ipairs(Players:GetPlayers()) do
+                if player ~= Players.LocalPlayer and checkBlacklist(player) then
+                    blacklistDetected = true
+                    badPlayerName = player.Name
+                    break
+                end
+            end
+            
+            if blacklistDetected then
+                if statusText then
+                    statusText.Text = "🚨 hanzxs System: Blacklist [" .. badPlayerName .. "] Terdeteksi! Hopping..."
+                end
+                serverHop()
+                timeRemaining = hopTime 
+            else
+                timeRemaining = timeRemaining - 1
+                local minutes = math.floor(timeRemaining / 60)
+                local seconds = timeRemaining % 60
+                
+                if statusText then
+                    statusText.Text = string.format(
+                        "hanzxs AFK System Active\nStatus: Aman dari Blacklist\nAuto Hop dalam: %02d:%02d", 
+                        minutes, 
+                        seconds
+                    )
+                end
+                
+                if timeRemaining <= 0 then
+                    if statusText then statusText.Text = "⏱️ Timer Habis. Auto Hop Server..." end
+                    serverHop()
+                    timeRemaining = hopTime 
+                end
+            end
+        else
+            if statusText then statusText.Text = "" end
+        end
+    end
+end)
     statusText.Font = Enum.Font.Code
     statusText.ZIndex = 1000000 
     statusText.Text = "hanzxs System: Inisialisasi..."
