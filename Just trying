@@ -1,277 +1,598 @@
+--[[
+    hanzxs AFK System v2 (Tap Simulator)
+
+    - Matikan 3D rendering + layar hitam (semua bisa dikembalikan saat OFF)
+    - Sembunyikan UI game Tap Simulator (tombol "Hide UI")
+    - Auto hop ke private server (timer atau saat ada pemain lain)
+    - Anti idle supaya tidak di-kick 20 menit
+    - Dijalankan ulang tidak membuat loop ganda
+]]
+
 local Workspace = game:GetService("Workspace")
 local Lighting = game:GetService("Lighting")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
 local CoreGui = game:GetService("CoreGui")
-local TeleportService = game:GetService("TeleportService")
-local HttpService = game:GetService("HttpService")
+local StarterGui = game:GetService("StarterGui")
+local VirtualUser = game:GetService("VirtualUser")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+local GUI_NAME = "hanzxs_AFK_Screen"
+local env = (type(getgenv) == "function" and getgenv()) or _G
 
 -- ==========================================
--- [ KONFIGURASI BLACKLIST ]
+-- PENGATURAN
 -- ==========================================
-local blacklistedPlayers = {
-    "KJNBGAKP10",
-    "yuraty081",
-    "KJNBGAKP11"
+local CONFIG = {
+    StartAfkOn = true,          -- AFK mode langsung ON saat script dijalankan
+    UiFollowsAfk = true,        -- AFK ON = UI game ikut disembunyikan, AFK OFF = UI kembali
+    HideCoreGui = true,         -- ikut sembunyikan chat / playerlist / backpack / health Roblox
+    KeepGuiNames = { "WindUI" },-- ScreenGui yang TIDAK boleh disembunyikan (UI script lain, mis. Silence)
+
+    AutoHop = false,            -- false = auto hop MATI total (timer + deteksi pemain lain), true = hidup
+    HopMinutes = 45,            -- jeda auto hop (menit). Jangan diisi 0, nanti hop terus-menerus
+    HopWhenOtherPlayers = false, -- hop kalau ada pemain lain di server (hanya berlaku kalau AutoHop = true)
+    AntiIdle = true,            -- cegah kick idle 20 menit
+
+    FpsCap = 30,                -- batas FPS saat AFK ON (false = jangan diubah, butuh setfpscap)
+    DisableEffects = true,      -- matikan particle/trail/beam/api/asap (bisa dikembalikan)
+    PermanentCleanup = true,   -- true = HAPUS decal/texture/clothing + clear terrain (TIDAK bisa dikembalikan)
 }
 
-local statusText
-local isTeleporting = false
-local systemEnabled = true 
-local originalSettings = {} 
-local isOptimized = false
+-- ==========================================
+-- 0. BERSIHKAN INSTANCE LAMA (kalau script dijalankan ulang)
+-- ==========================================
+if env.HanzxsAFK and type(env.HanzxsAFK.Stop) == "function" then
+    pcall(env.HanzxsAFK.Stop)
+end
 
 -- ==========================================
--- 0. SIMPAN PENGATURAN ASLI 
+-- 1. STATE
+-- ==========================================
+local alive = true
+local connections = {}
+local state = { afk = false, uiHidden = false, hopping = false }
+local original = {}
+
+local weakKeys = { __mode = "k" }
+local mutedEffects = setmetatable({}, weakKeys) -- [effect] = true (yang kita matikan sendiri)
+local guiState = setmetatable({}, weakKeys)     -- [ScreenGui] = nilai Enabled asli
+local guiWatchers = setmetatable({}, weakKeys)  -- [ScreenGui] = koneksi pantau Enabled
+local coreState = nil
+local scanId = 0
+local permanentDone = false
+
+local mainGui, blackFrame, statusText, afkButton, uiButton
+
+local function track(connection)
+    connections[#connections + 1] = connection
+    return connection
+end
+
+local function setStatus(text)
+    if statusText then
+        statusText.Text = text
+    end
+end
+
+-- ==========================================
+-- 2. SIMPAN PENGATURAN ASLI (untuk fitur OFF)
 -- ==========================================
 local function saveOriginalSettings()
-    originalSettings.GlobalShadows = Lighting.GlobalShadows
-    originalSettings.Brightness = Lighting.Brightness
-    originalSettings.ClockTime = Lighting.ClockTime
-    originalSettings.FogEnd = Lighting.FogEnd
-    originalSettings.QualityLevel = settings().Rendering.QualityLevel
+    original.GlobalShadows = Lighting.GlobalShadows
+    original.Brightness = Lighting.Brightness
+    original.ClockTime = Lighting.ClockTime
+    original.FogEnd = Lighting.FogEnd
+
+    pcall(function()
+        original.QualityLevel = settings().Rendering.QualityLevel
+    end)
+
+    if type(getfpscap) == "function" then
+        pcall(function()
+            original.FpsCap = getfpscap()
+        end)
+    end
 end
 saveOriginalSettings()
 
 -- ==========================================
--- 1. FUNGSI UI & BLACK SCREEN
+-- 3. UI: LAYAR HITAM + TOMBOL
 -- ==========================================
-local function createUI()
-    if CoreGui:FindFirstChild("hanzxs_AFK_Screen") then
-        CoreGui.hanzxs_AFK_Screen:Destroy()
-    end
-    if Players.LocalPlayer:WaitForChild("PlayerGui"):FindFirstChild("hanzxs_AFK_Screen") then
-        Players.LocalPlayer.PlayerGui.hanzxs_AFK_Screen:Destroy()
+local GREEN = Color3.fromRGB(0, 153, 0)
+local RED = Color3.fromRGB(204, 0, 0)
+local GREY = Color3.fromRGB(51, 51, 51)
+
+local function destroyOldGui()
+    local places = { CoreGui, playerGui }
+
+    if type(gethui) == "function" then
+        local ok, hui = pcall(gethui)
+        if ok and hui then
+            places[#places + 1] = hui
+        end
     end
 
-    local mainGui = Instance.new("ScreenGui")
-    mainGui.Name = "hanzxs_AFK_Screen"
+    for _, place in ipairs(places) do
+        pcall(function()
+            local old = place:FindFirstChild(GUI_NAME)
+            if old then
+                old:Destroy()
+            end
+        end)
+    end
+end
+
+local function mountGui(gui)
+    if type(gethui) == "function" then
+        local ok = pcall(function()
+            gui.Parent = gethui()
+        end)
+        if ok and gui.Parent then return end
+    end
+
+    local ok = pcall(function()
+        gui.Parent = CoreGui
+    end)
+    if ok and gui.Parent then return end
+
+    gui.Parent = playerGui
+end
+
+local function makeButton(parent, yOffset)
+    local button = Instance.new("TextButton")
+    button.Size = UDim2.new(0, 150, 0, 50)
+    button.Position = UDim2.new(1, -160, 1, yOffset) -- pojok kanan bawah
+    button.BackgroundColor3 = GREY
+    button.TextColor3 = Color3.new(1, 1, 1)
+    button.Font = Enum.Font.GothamBold
+    button.TextSize = 18
+    button.ZIndex = 1000001
+    button.Parent = parent
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = button
+
+    return button
+end
+
+local function createUI()
+    destroyOldGui()
+
+    mainGui = Instance.new("ScreenGui")
+    mainGui.Name = GUI_NAME
     mainGui.IgnoreGuiInset = true
     mainGui.ResetOnSpawn = false
-    
-    local frame = Instance.new("Frame")
-    frame.Name = "BlackScreenFrame"
-    frame.BackgroundColor3 = Color3.new(0.05, 0.05, 0.05)
-    frame.Size = UDim2.new(1, 0, 1, 0)
-    frame.ZIndex = 999999 
-    frame.Visible = systemEnabled
-    frame.Parent = mainGui
-    
+    mainGui.DisplayOrder = 999999
+    mainGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+    blackFrame = Instance.new("Frame")
+    blackFrame.Name = "BlackScreenFrame"
+    blackFrame.BackgroundColor3 = Color3.new(0.05, 0.05, 0.05)
+    blackFrame.BorderSizePixel = 0
+    blackFrame.Size = UDim2.new(1, 0, 1, 0)
+    blackFrame.ZIndex = 999999
+    blackFrame.Visible = false
+    blackFrame.Parent = mainGui
+
     statusText = Instance.new("TextLabel")
     statusText.Size = UDim2.new(1, 0, 1, 0)
     statusText.BackgroundTransparency = 1
     statusText.TextColor3 = Color3.new(0, 1, 0)
     statusText.TextSize = 35
     statusText.Font = Enum.Font.Code
-    statusText.ZIndex = 1000000 
-    statusText.Text = "hanzxs System: Inisialisasi..."
-    statusText.Parent = frame
+    statusText.ZIndex = 1000000
+    statusText.Text = "hanzxs AFK System Menunggu..."
+    statusText.Parent = blackFrame
 
-    local toggleBtn = Instance.new("TextButton")
-    toggleBtn.Size = UDim2.new(0, 150, 0, 50)
-    toggleBtn.Position = UDim2.new(1, -160, 1, -60) 
-    toggleBtn.BackgroundColor3 = Color3.new(0.2, 0.2, 0.2)
-    toggleBtn.TextColor3 = Color3.new(1, 1, 1)
-    toggleBtn.Font = Enum.Font.GothamBold
-    toggleBtn.TextSize = 20
-    toggleBtn.Text = systemEnabled and "hanzxs: ON" or "hanzxs: OFF"
-    toggleBtn.ZIndex = 1000001
-    toggleBtn.Parent = mainGui
-    
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 8)
-    corner.Parent = toggleBtn
+    afkButton = makeButton(mainGui, -60)
+    uiButton = makeButton(mainGui, -120)
 
-    local success = pcall(function() mainGui.Parent = CoreGui end)
-    if not success then mainGui.Parent = Players.LocalPlayer:WaitForChild("PlayerGui") end
-
-    return mainGui, frame, toggleBtn
+    mountGui(mainGui)
 end
 
-local gui, blackFrame, toggleButton = createUI()
+createUI()
 
--- ==========================================
--- 2. LOGIKA OPTIMASI (ON) & RESTORE (OFF)
--- ==========================================
-local function toggleOptimization(state)
-    isOptimized = state
-    blackFrame.Visible = state
-    
-    if state then
-        pcall(function() RunService:Set3dRenderingEnabled(false) end)
-        settings().Rendering.QualityLevel = 1
-        Lighting.Brightness = 0
-        Lighting.ClockTime = 0
-        Lighting.FogEnd = 0
-        Lighting.GlobalShadows = false
-        for _, obj in pairs(Workspace:GetDescendants()) do
-            if obj:IsA("BasePart") then obj.Transparency = 1 end
-        end
-    else
-        pcall(function() RunService:Set3dRenderingEnabled(true) end)
-        settings().Rendering.QualityLevel = originalSettings.QualityLevel
-        Lighting.Brightness = originalSettings.Brightness
-        Lighting.ClockTime = originalSettings.ClockTime
-        Lighting.FogEnd = originalSettings.FogEnd
-        Lighting.GlobalShadows = originalSettings.GlobalShadows
-        for _, obj in pairs(Workspace:GetDescendants()) do
-            if obj:IsA("BasePart") then obj.Transparency = 0 end
-        end
-    end
+local function refreshButtons()
+    afkButton.Text = state.afk and "hanzxs: ON" or "hanzxs: OFF"
+    afkButton.BackgroundColor3 = state.afk and GREEN or RED
+
+    uiButton.Text = state.uiHidden and "Hide UI: ON" or "Hide UI: OFF"
+    uiButton.BackgroundColor3 = state.uiHidden and GREEN or GREY
 end
 
-if systemEnabled then
-    toggleOptimization(true)
-    local function killObject(obj)
-        if obj:IsA("Decal") or obj:IsA("Texture") or obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") or obj:IsA("ShirtGraphic") or obj:IsA("Clothing") then
-            pcall(function() obj:Destroy() end)
-        elseif obj:IsA("BasePart") then
-            obj.Material = Enum.Material.SmoothPlastic
-        end
-    end
-    for _, obj in pairs(Workspace:GetDescendants()) do killObject(obj) end
-    Workspace.DescendantAdded:Connect(function(obj) if systemEnabled then killObject(obj) end end)
-    local terrain = Workspace:FindFirstChildOfClass("Terrain")
-    if terrain then terrain:Clear() end
-end
-
-toggleButton.MouseButton1Click:Connect(function()
-    systemEnabled = not systemEnabled 
-    
-    if systemEnabled then
-        toggleButton.Text = "hanzxs: ON"
-        toggleButton.BackgroundColor3 = Color3.new(0, 0.6, 0)
-        toggleOptimization(true)
-    else
-        toggleButton.Text = "hanzxs: OFF"
-        toggleButton.BackgroundColor3 = Color3.new(0.8, 0, 0)
-        toggleOptimization(false)
-        if statusText then statusText.Text = "" end 
-    end
-end)
-toggleButton.BackgroundColor3 = systemEnabled and Color3.new(0, 0.6, 0) or Color3.new(0.8, 0, 0)
-
 -- ==========================================
--- 3. LOGIKA SERVER HOP (FIXED WITH ROPROXY)
+-- 4. OPTIMASI: EFFECT / CLEANUP
 -- ==========================================
-local function serverHop()
-    if isTeleporting or not systemEnabled then return end
-    isTeleporting = true 
-    
-    if statusText and systemEnabled then 
-        statusText.Text = "🚀 hanzxs System: Mencari Server Publik Baru..." 
-    end
+local EFFECT_CLASSES = { "ParticleEmitter", "Trail", "Beam", "Fire", "Smoke", "Sparkles" }
 
-    -- Universal HTTP Request Detector untuk Executor
-    local httpRequest = (syn and syn.request) or (http and http.request) or http_request or request or (fluxus and fluxus.request)
-    
-    local success = pcall(function()
-        local placeId = game.PlaceId
-        local currentJobId = game.JobId
-        -- Penggunaan roproxy.com agar tidak diblokir Roblox
-        local url = "https://games.roproxy.com/v1/games/" .. placeId .. "/servers/Public?sortOrder=Desc&limit=100"
-        
-        local responseBody = ""
-        if httpRequest then
-            local res = httpRequest({Url = url, Method = "GET"})
-            responseBody = res.Body
-        else
-            responseBody = game:HttpGet(url)
-        end
-        
-        local data = HttpService:JSONDecode(responseBody)
-        if data and data.data then
-            local validServers = {}
-            for _, server in ipairs(data.data) do
-                if type(server) == "table" and server.playing < server.maxPlayers and server.id ~= currentJobId then
-                    table.insert(validServers, server.id)
-                end
-            end
-            
-            -- Jika ditemukan server publik lain yang belum penuh
-            if #validServers > 0 then
-                local targetServerId = validServers[math.random(1, #validServers)]
-                TeleportService:TeleportToPlaceInstance(placeId, targetServerId, Players.LocalPlayer)
-                return
-            end
-        end
-        
-        -- Fallback 1: Jika list kosong/gagal parse API
-        TeleportService:Teleport(placeId, Players.LocalPlayer)
-    end)
-
-    if not success then
-        -- Fallback 2: Jika script mengalami error
-        pcall(function() TeleportService:Teleport(game.PlaceId, Players.LocalPlayer) end)
-    end
-    
-    task.wait(10)
-    isTeleporting = false
-end
-
--- Reset status teleport jika gagal agar tidak 'stuck'
-TeleportService.TeleportInitFailed:Connect(function()
-    isTeleporting = false
-    if statusText and systemEnabled then
-        statusText.Text = "⚠️ Teleport Gagal! Mencoba ulang..."
-    end
-end)
-
--- ==========================================
--- 4. LOGIKA DETEKSI BLACKLIST & TIMER
--- ==========================================
-local function checkBlacklist(player)
-    for _, name in ipairs(blacklistedPlayers) do
-        if string.lower(player.Name) == string.lower(name) or string.lower(player.DisplayName) == string.lower(name) then
+local function isEffect(obj)
+    for _, className in ipairs(EFFECT_CLASSES) do
+        if obj:IsA(className) then
             return true
         end
     end
     return false
 end
 
--- Event Real-time saat ada pemain masuk
-Players.PlayerAdded:Connect(function(player)
-    if systemEnabled and checkBlacklist(player) then
-        if statusText then
-            statusText.Text = "🚨 BAHAYA: [" .. player.Name .. "] Masuk Server! Auto Hop..."
+local function optimizeObject(obj)
+    if CONFIG.PermanentCleanup then
+        -- Mode permanen (sama seperti versi lama): objek DIHAPUS, tidak bisa dikembalikan
+        if isEffect(obj) or obj:IsA("Decal") or obj:IsA("Texture")
+            or obj:IsA("Clothing") or obj:IsA("ShirtGraphic") then
+            pcall(function()
+                obj:Destroy()
+            end)
+        elseif obj:IsA("BasePart") then
+            pcall(function()
+                obj.Material = Enum.Material.SmoothPlastic
+            end)
         end
-        serverHop()
+    elseif CONFIG.DisableEffects and isEffect(obj) and obj.Enabled then
+        -- Mode aman: cukup dimatikan, nanti dinyalakan lagi saat OFF
+        mutedEffects[obj] = true
+        pcall(function()
+            obj.Enabled = false
+        end)
+    end
+end
+
+-- Scan Workspace per 500 objek supaya game tidak freeze
+local function scanWorkspace(callback)
+    scanId = scanId + 1
+    local myScan = scanId
+    local count = 0
+
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        if myScan ~= scanId or not alive then return end
+        callback(obj)
+        count = count + 1
+        if count % 500 == 0 then
+            task.wait()
+        end
+    end
+end
+
+-- ==========================================
+-- 5. AFK MODE: 3D RENDER ON / OFF
+-- ==========================================
+local function applyRender(on)
+    state.afk = on
+    blackFrame.Visible = on
+
+    if on then
+        pcall(function()
+            RunService:Set3dRenderingEnabled(false)
+        end)
+        pcall(function()
+            settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+        end)
+
+        Lighting.Brightness = 0
+        Lighting.ClockTime = 0
+        Lighting.FogEnd = 0
+        Lighting.GlobalShadows = false
+
+        if CONFIG.FpsCap and type(setfpscap) == "function" then
+            pcall(setfpscap, CONFIG.FpsCap)
+        end
+
+        if CONFIG.DisableEffects or CONFIG.PermanentCleanup then
+            task.spawn(function()
+                scanWorkspace(optimizeObject)
+
+                if CONFIG.PermanentCleanup and not permanentDone then
+                    permanentDone = true
+                    local terrain = Workspace:FindFirstChildOfClass("Terrain")
+                    if terrain then
+                        pcall(function()
+                            terrain:Clear()
+                        end)
+                    end
+                end
+            end)
+        end
+    else
+        scanId = scanId + 1 -- hentikan scan yang masih berjalan
+
+        pcall(function()
+            RunService:Set3dRenderingEnabled(true)
+        end)
+
+        if original.QualityLevel then
+            pcall(function()
+                settings().Rendering.QualityLevel = original.QualityLevel
+            end)
+        end
+
+        Lighting.Brightness = original.Brightness
+        Lighting.ClockTime = original.ClockTime
+        Lighting.FogEnd = original.FogEnd
+        Lighting.GlobalShadows = original.GlobalShadows
+
+        if CONFIG.FpsCap and type(setfpscap) == "function" then
+            pcall(setfpscap, original.FpsCap or 60)
+        end
+
+        for effect in pairs(mutedEffects) do
+            pcall(function()
+                effect.Enabled = true
+            end)
+            mutedEffects[effect] = nil
+        end
+    end
+end
+
+-- ==========================================
+-- 6. SEMBUNYIKAN UI GAME (Tap Simulator)
+-- ==========================================
+local function isKept(gui)
+    if gui == mainGui or gui.Name == GUI_NAME then
+        return true
+    end
+
+    for _, name in ipairs(CONFIG.KeepGuiNames) do
+        if gui.Name == name then
+            return true
+        end
+    end
+
+    return false
+end
+
+local function hideGui(gui)
+    if not gui:IsA("LayerCollector") or isKept(gui) then return end
+
+    if guiState[gui] == nil then
+        guiState[gui] = gui.Enabled
+    end
+    gui.Enabled = false
+
+    -- Kalau game mencoba menampilkannya lagi saat mode sembunyi, tahan tetap tersembunyi
+    if not guiWatchers[gui] then
+        guiWatchers[gui] = gui:GetPropertyChangedSignal("Enabled"):Connect(function()
+            if state.uiHidden and gui.Enabled then
+                guiState[gui] = true
+                gui.Enabled = false
+            end
+        end)
+    end
+end
+
+local function hideCoreGui()
+    if coreState then return end
+    coreState = {}
+
+    for _, coreType in ipairs(Enum.CoreGuiType:GetEnumItems()) do
+        if coreType ~= Enum.CoreGuiType.All then
+            local ok, enabled = pcall(function()
+                return StarterGui:GetCoreGuiEnabled(coreType)
+            end)
+
+            if ok then
+                coreState[coreType] = enabled
+                if enabled then
+                    pcall(function()
+                        StarterGui:SetCoreGuiEnabled(coreType, false)
+                    end)
+                end
+            end
+        end
+    end
+end
+
+local function restoreCoreGui()
+    if not coreState then return end
+
+    for coreType, enabled in pairs(coreState) do
+        if enabled then
+            pcall(function()
+                StarterGui:SetCoreGuiEnabled(coreType, true)
+            end)
+        end
+    end
+
+    coreState = nil
+end
+
+local function setUiHidden(hidden)
+    state.uiHidden = hidden -- harus diset dulu, sebelum Enabled diubah (dipantau watcher)
+
+    if hidden then
+        for _, gui in ipairs(playerGui:GetChildren()) do
+            hideGui(gui)
+        end
+
+        if CONFIG.HideCoreGui then
+            hideCoreGui()
+        end
+    else
+        for gui, wasEnabled in pairs(guiState) do
+            guiState[gui] = nil
+            if gui.Parent then
+                pcall(function()
+                    gui.Enabled = wasEnabled
+                end)
+            end
+        end
+
+        restoreCoreGui()
+    end
+
+    refreshButtons()
+end
+
+-- UI baru yang muncul saat mode sembunyi juga langsung disembunyikan
+track(playerGui.ChildAdded:Connect(function(child)
+    if state.uiHidden then
+        hideGui(child)
+    end
+end))
+
+local function setAfk(on)
+    applyRender(on)
+
+    if CONFIG.UiFollowsAfk then
+        setUiHidden(on)
+    end
+
+    refreshButtons()
+end
+
+-- ==========================================
+-- 7. EFFECT BARU SAAT AFK MODE ON
+-- ==========================================
+track(Workspace.DescendantAdded:Connect(function(obj)
+    if state.afk then
+        optimizeObject(obj)
+    end
+end))
+
+-- ==========================================
+-- 8. TOMBOL
+-- ==========================================
+track(afkButton.Activated:Connect(function()
+    setAfk(not state.afk)
+end))
+
+track(uiButton.Activated:Connect(function()
+    setUiHidden(not state.uiHidden)
+end))
+
+-- ==========================================
+-- 9. ANTI IDLE
+-- ==========================================
+if CONFIG.AntiIdle then
+    track(player.Idled:Connect(function()
+        pcall(function()
+            VirtualUser:CaptureController()
+            VirtualUser:ClickButton2(Vector2.new(0, 0))
+        end)
+    end))
+end
+
+-- ==========================================
+-- 10. AUTO HOP & TIMER
+-- ==========================================
+local function teleportToPrivateServer()
+    if not CONFIG.AutoHop or state.hopping or not state.afk then return end
+    state.hopping = true
+
+    setStatus("🚀 hanzxs System: Teleporting ke server baru...")
+
+    pcall(function()
+        local remotes = ReplicatedStorage:WaitForChild("Remotes", 10)
+        local afkTeleport = remotes and remotes:WaitForChild("AFKTeleport", 10)
+        if afkTeleport then
+            afkTeleport:FireServer("PrivateServer")
+        end
+    end)
+
+    task.wait(10)
+    state.hopping = false
+end
+
+task.spawn(function()
+    local hopSeconds = CONFIG.HopMinutes * 60
+    local remaining = hopSeconds
+
+    task.wait(3)
+    local last = os.clock()
+
+    while alive do
+        task.wait(1)
+
+        local now = os.clock()
+        local delta = now - last
+        last = now
+
+        if state.afk then
+            if CONFIG.AutoHop and CONFIG.HopWhenOtherPlayers and #Players:GetPlayers() > 1 then
+                setStatus("🚨 hanzxs System: Terdeteksi pemain lain! Auto Hop dipicu...")
+                teleportToPrivateServer()
+                remaining = hopSeconds
+                last = os.clock()
+            elseif CONFIG.AutoHop then
+                -- timer dihitung dari waktu nyata, jadi tetap akurat walau FPS rendah
+                remaining = remaining - delta
+
+                local secondsLeft = math.max(0, math.floor(remaining))
+                setStatus(string.format(
+                    "hanzxs AFK System Active\nServer: Solo Player\nUI Game: %s\nNext Hop dalam: %02d:%02d",
+                    state.uiHidden and "Disembunyikan" or "Tampil",
+                    math.floor(secondsLeft / 60),
+                    secondsLeft % 60
+                ))
+
+                if remaining <= 0 then
+                    teleportToPrivateServer()
+                    remaining = hopSeconds
+                    last = os.clock()
+                end
+            else
+                setStatus(string.format(
+                    "hanzxs AFK System Active\nAuto Hop: OFF\nUI Game: %s",
+                    state.uiHidden and "Disembunyikan" or "Tampil"
+                ))
+            end
+        else
+            -- Sistem OFF: timer dibekukan (tidak direset)
+            setStatus("")
+        end
     end
 end)
 
-task.spawn(function()
-    local hopTime = 2700 -- 45 Menit
-    local timeRemaining = hopTime
-    
-    while true do
-        task.wait(1)
-        
-        if systemEnabled then
-            local blacklistDetected = false
-            local badPlayerName = ""
-            
-            for _, player in ipairs(Players:GetPlayers()) do
-                if player ~= Players.LocalPlayer and checkBlacklist(player) then
-                    blacklistDetected = true
-                    badPlayerName = player.Name
-                    break
-                end
-            end
-            
-            if blacklistDetected then
-                if statusText then
-                    statusText.Text = "🚨 hanzxs System: Blacklist [" .. badPlayerName .. "] Terdeteksi! Hopping..."
-                end
-                serverHop()
-                timeRemaining = hopTime 
-            else
-                timeRemaining = timeRemaining - 1
-                local minutes = math.floor(timeRemaining / 60)
-                local seconds = timeRemaining % 60
-                
-                if statusText then
-                    statusText.Text = string.format(
+-- ==========================================
+-- 11. STOP (dipanggil otomatis kalau script dijalankan ulang)
+-- ==========================================
+local function stop()
+    if not alive then return end
+
+    if state.afk then
+        applyRender(false)
+    end
+    if state.uiHidden then
+        setUiHidden(false)
+    end
+
+    alive = false
+    scanId = scanId + 1
+
+    for _, connection in ipairs(connections) do
+        pcall(function()
+            connection:Disconnect()
+        end)
+    end
+
+    for _, connection in pairs(guiWatchers) do
+        pcall(function()
+            connection:Disconnect()
+        end)
+    end
+
+    if mainGui then
+        pcall(function()
+            mainGui:Destroy()
+        end)
+    end
+
+    env.HanzxsAFK = nil
+end
+
+env.HanzxsAFK = { Stop = stop }
+
+-- ==========================================
+-- 12. START
+-- ==========================================
+refreshButtons()
+
+if CONFIG.StartAfkOn then
+    setAfk(true)
+end
+                  statusText.Text = string.format(
                         "hanzxs AFK System Active\nStatus: Aman dari Blacklist\nAuto Hop dalam: %02d:%02d", 
                         minutes, 
                         seconds
